@@ -112,7 +112,7 @@ h1, h2, h3, p { margin: 0; }
 .document-title { min-width: 0; }
 .document-meta { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
 .document-title h2 { font-size: 23px; line-height: 1.28; overflow-wrap: anywhere; }
-.theme-picker { display: flex; gap: 3px; padding: 3px; flex-shrink: 0; }
+.theme-picker { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; max-width: 100%; flex-shrink: 0; }
 .theme-picker button {
   display: flex; align-items: center; gap: 5px; padding: 6px 8px;
   min-height: 32px; border: 1px solid transparent; border-radius: 6px; background: transparent;
@@ -120,6 +120,8 @@ h1, h2, h3, p { margin: 0; }
 }
 .theme-picker button:hover { background: #e9f0eb; }
 .theme-picker button[aria-pressed="true"] { border-color: #ccdacf; background: white; color: var(--action); font-weight: 650; }
+.theme-picker button svg { width: 15px; height: 15px; }
+.theme-picker button[data-current]:not([aria-pressed="true"]) .theme-swatches { outline: 1px solid #759980; outline-offset: 2px; }
 .theme-swatches { display: flex; width: 17px; height: 17px; border: 1px solid #9aaba0; border-radius: 50%; overflow: hidden; }
 .theme-swatches span { flex: 1; }
 .status {

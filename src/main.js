@@ -21,6 +21,7 @@ import {
 const root = document.querySelector('#app');
 const hostWindow = window.parent !== window && new URLSearchParams(location.search).has('wid');
 const storageKey = 'slidebrief.v1';
+const defaultTheme = 'editorial';
 const uiThemeNames = { editorial: '纸本', midnight: '深海', sage: '苔青' };
 const blankBrief = { topic: '', audience: '', goal: '', source: '', count: 5 };
 const fields = ['topic', 'audience', 'goal', 'source'];
@@ -31,7 +32,7 @@ const stageLabels = {
   repair: '正在修订核对发现的问题',
 };
 const app = {
-  brief: { ...blankBrief }, deck: structuredClone(sampleDeck), theme: 'editorial',
+  brief: { ...blankBrief }, deck: structuredClone(sampleDeck), themeOverride: null,
   origin: 'sample', index: 0, editing: false, showingNotes: false, status: null,
   busy: '', progress: '', usage: null, usageAction: '', review: null,
   connection: hostWindow ? 'connecting' : 'local',
@@ -100,7 +101,8 @@ root.innerHTML = `
           <div class="document-meta" id="document-meta"></div>
           <h2 id="deck-title"></h2>
         </div>
-        <div class="theme-picker" aria-label="演示主题">
+        <div class="theme-picker" role="group" aria-label="演示主题">
+          ${button('theme', sparkles, '自动', 'data-theme="auto" id="theme-auto"')}
           ${Object.entries(THEMES).map(([id, theme]) => `
             <button type="button" data-action="theme" data-theme="${id}" title="${uiThemeNames[id]}" aria-label="${uiThemeNames[id]}主题">
               <span class="theme-swatches" data-swatch="${id}" aria-hidden="true"></span><span>${uiThemeNames[id] ?? escaped(theme.name)}</span>
@@ -164,8 +166,15 @@ function clearCurrentEvidence() {
   if (currentEvidence().length) app.deck.evidence[app.index] = [];
 }
 
+function activeTheme() {
+  return app.themeOverride ?? (Object.hasOwn(THEMES, app.deck.visualTheme) ? app.deck.visualTheme : defaultTheme);
+}
+
 function slideOptions(index) {
-  return { theme: app.theme, index, total: app.deck.slides.length, deckTitle: app.deck.title };
+  return {
+    theme: activeTheme(), visualSubject: app.deck.visualSubject,
+    index, total: app.deck.slides.length, deckTitle: app.deck.title,
+  };
 }
 
 function renderBrief() {
@@ -229,8 +238,14 @@ function renderChrome() {
   element('previous').disabled = app.index === 0 || app.busy === 'rewrite';
   element('next').disabled = app.index === app.deck.slides.length - 1 || app.busy === 'rewrite';
   element('page-index').textContent = `${app.index + 1} / ${app.deck.slides.length}`;
-  root.querySelectorAll('[data-theme]').forEach((control) => {
-    control.setAttribute('aria-pressed', String(control.dataset.theme === app.theme));
+  const theme = activeTheme();
+  const auto = element('theme-auto');
+  const autoLabel = app.themeOverride === null ? `自动选择主题，当前为${uiThemeNames[theme]}` : '自动选择主题';
+  auto.setAttribute('aria-label', autoLabel);
+  auto.title = autoLabel;
+  root.querySelectorAll('.theme-picker button').forEach((control) => {
+    control.setAttribute('aria-pressed', String(control.dataset.theme === (app.themeOverride ?? 'auto')));
+    control.toggleAttribute('data-current', control.dataset.theme === theme);
   });
 }
 
@@ -341,7 +356,10 @@ function renderDeck({ keepEditor = false } = {}) {
 }
 
 function snapshot() {
-  return { version: 1, brief: app.brief, deck: app.deck, theme: app.theme, origin: app.origin, index: app.index, review: app.review };
+  return {
+    version: 1, brief: app.brief, deck: app.deck, theme: activeTheme(), themeOverride: app.themeOverride,
+    origin: app.origin, index: app.index, review: app.review,
+  };
 }
 
 function save() {
@@ -383,7 +401,9 @@ function restore(data) {
     app.index = Number.isInteger(data.index) ? Math.max(0, Math.min(data.index, app.deck.slides.length - 1)) : 0;
     app.origin = data.origin === 'sample' ? 'sample' : 'edited';
     setReview(data.review);
-    if (Object.hasOwn(THEMES, data.theme)) app.theme = data.theme;
+    const legacyOverride = data.theme === defaultTheme ? null : data.theme;
+    const override = Object.hasOwn(data, 'themeOverride') ? data.themeOverride : legacyOverride;
+    app.themeOverride = Object.hasOwn(THEMES, override) ? override : null;
   } catch { /* Use the example when the saved deck cannot be recovered. */ }
 }
 
@@ -467,7 +487,7 @@ async function exportDeck() {
   setBusy('export');
   try {
     const deck = validateDeck(app.deck);
-    const blob = await createPptxBlob(deck, app.theme);
+    const blob = await createPptxBlob(deck, activeTheme());
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -550,7 +570,7 @@ root.addEventListener('click', (event) => {
       save();
       break;
     case 'theme':
-      app.theme = theme;
+      app.themeOverride = theme === 'auto' ? null : theme;
       save();
       renderDeck({ keepEditor: true });
       break;

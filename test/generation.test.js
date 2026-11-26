@@ -38,6 +38,8 @@ test('plans against numbered source excerpts, writes, and audits using separate 
   const { deck, usage, review } = await generateDeck(anna, sampleBrief, { onProgress: (stage) => stages.push(stage) });
   assert.deepEqual(deck.slides, sampleDeck.slides);
   assert.equal(deck.title, sampleDeck.title);
+  assert.equal(deck.visualSubject, 'operations');
+  assert.equal(deck.visualTheme, 'editorial');
   assert.equal(deck.evidence.length, sampleDeck.slides.length);
   assert.deepEqual(deck.evidence[0], []);
   assert.ok(sampleBrief.source.includes(deck.evidence[1][0]));
@@ -54,6 +56,13 @@ test('plans against numbered source excerpts, writes, and audits using separate 
   assert.match(requests[0].systemPrompt, /exactly 5 pages/);
   assert.deepEqual(JSON.parse(requests[1].messages[0].content.text).plan, plan.slides);
   assert.deepEqual(JSON.parse(requests[2].messages[0].content.text).reviewPages, [1, 2, 3, 4, 5]);
+});
+
+test('keeps a generated subject and its associated palette when restoring a draft', () => {
+  const draft = { ...sampleDeck, visualSubject: 'technology', visualTheme: 'editorial' };
+  const restored = validateDeck(draft, undefined, { draft: true });
+  assert.equal(restored.visualSubject, 'technology');
+  assert.equal(restored.visualTheme, 'midnight');
 });
 
 test('repairs only pages named by the reviewer and verifies those pages again', async () => {

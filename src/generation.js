@@ -1,4 +1,5 @@
 import { findReadabilityIssues } from './deck.js';
+import { recommendVisualStyle } from './visuals.js';
 
 export const SLIDE_COUNTS = Object.freeze([4, 5, 6, 8]);
 
@@ -68,6 +69,9 @@ export function validateDeck(value, expectedCount, { draft = false } = {}) {
     deck.evidence = value.evidence.map((quotes) => Array.isArray(quotes)
       ? quotes.filter((quote) => typeof quote === 'string' && quote.trim() && quote.length <= FIELD_LIMITS.source).slice(0, 3)
       : []);
+  }
+  if (['operations', 'technology', 'finance', 'general'].includes(value.visualSubject)) {
+    Object.assign(deck, recommendVisualStyle(deck, value.visualSubject));
   }
   return deck;
 }
@@ -214,10 +218,13 @@ export async function generateDeck(anna, brief, { onProgress } = {}) {
     return result;
   };
 
-  const plan = await run('plan', `Plan a clear work briefing for the given audience and decision. ${sourceRule}
+  const { plan, visualStyle } = await run('plan', `Plan a clear work briefing for the given audience and decision. ${sourceRule}
 Give each page one distinct takeaway. Make known evidence, proposed work, and missing information distinguishable. Reserve a page for important reported numbers or success criteria where helpful. Use qualitative evidence when no metrics were supplied. The closing should state the precise requested decision first. Avoid generic sections and repeating the cover. Preserve every decision-critical fact somewhere in the plan. Prefer exact phrases for metrics, quantities and the terms describing their status.
-Return only {"slides":[{"layout":"${Object.keys(LAYOUTS).join('|')}","takeaway":"specific main message, at most 200 characters","sourceIds":[1]}]}. Return exactly ${input.count} pages, cover first and closing last. Use up to 3 existing source IDs per page for the evidence that directly supports it. Use [] where the page is a proposal or has no available evidence.
-${editorialRules}`, context, 500 + 160 * input.count, (value) => plannedSlides(value, input.count, excerpts.length));
+Return only {"visualSubject":"operations|technology|finance|general","slides":[{"layout":"${Object.keys(LAYOUTS).join('|')}","takeaway":"specific main message, at most 200 characters","sourceIds":[1]}]}. Select the cover subject from the primary topic (technology for system failures, finance for procurement, operations for service improvement). Return exactly ${input.count} pages, cover first and closing last. Use up to 3 existing source IDs per page for evidence that directly supports it. Use [] where the page is a proposal or has no available evidence.
+${editorialRules}`, context, 500 + 160 * input.count, (value) => ({
+    plan: plannedSlides(value, input.count, excerpts.length),
+    visualStyle: recommendVisualStyle(input, value.visualSubject),
+  }));
 
   const writingPrompt = `Write a complete editable presentation following the supplied slide plan and materials. ${sourceRule}
 Use the exact layout, ordering and count in the plan. A polished title should express the page's actual takeaway. Use the most relevant verifiable facts, and include notes for every page. Put details in notes when needed to keep slides readable, with status and main decision visible on the slide.
@@ -238,6 +245,7 @@ ${editorialRules}`;
     deck = await write(reason);
   }
   if (excerpts.length) deck.evidence = plan.map(({ sourceIds }) => sourceIds.map((id) => excerpts[id - 1]));
+  Object.assign(deck, visualStyle);
 
   const review = async (pages, candidate) => run('review', reviewPrompt, {
     ...context, plan, deck: candidate.slides, reviewPages: pages,
@@ -308,6 +316,7 @@ export const sampleBrief = Object.freeze({
 
 const example = {
   title: '客户支持知识库四周试点',
+  ...recommendVisualStyle(sampleBrief),
   slides: [
     {
       layout: 'cover',

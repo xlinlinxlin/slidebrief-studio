@@ -12,6 +12,7 @@ const metrics = [
 ];
 const deck = {
   title: '阶段回顾与下一步',
+  visualSubject: 'operations',
   slides: layouts.map((layout, index) => ({
     layout,
     title: index === 0 ? '质量 & 进度 <2026>' : `试点计划 ${index + 1}`,
@@ -43,14 +44,22 @@ test('writes editable wide PowerPoint slides, notes, and the selected theme', as
     } else {
       assert.equal((page.match(/<a:t>明确责任人<\/a:t>/gu) ?? []).length, slide.items.length);
     }
-    assert.doesNotMatch(page, /<p:pic\b/);
     const notes = await xml(`ppt/notesSlides/notesSlide${index + 1}.xml`);
     assert.match(notes, /先陈述目标，再解释节奏。 Q&amp;A/u);
+    if (slide.layout === 'cover') {
+      assert.match(page, /<p:pic\b/);
+      assert.match(notes, /Pexels/u);
+    } else {
+      assert.doesNotMatch(page, /<p:pic\b/);
+    }
   }
   const cover = await xml('ppt/slides/slide1.xml');
   assert.match(cover, /<p:bg><p:bgPr><a:solidFill><a:srgbClr val="11192C"/);
   assert.match(cover, /质量 &amp; 进度 &lt;2026&gt;/u);
-  assert.match(await xml('ppt/slides/slide4.xml'), /<a:t>04<\/a:t>/);
+  const roadmap = await xml('ppt/slides/slide4.xml');
+  assert.match(roadmap, /<a:t>04<\/a:t>/);
+  assert.match(roadmap, /<a:prstGeom prst="ellipse">/);
+  assert.equal(Object.keys(pptx.files).filter((name) => /^ppt\/media\/[^/]+\.jpe?g$/iu.test(name)).length, 1);
 });
 
 function textBox(page, value) {
@@ -93,7 +102,55 @@ test('promotes roadmap weeks, the primary point, and the closing decision', asyn
     const followUp = textBox(closingPage, heading);
     assert.ok(decision.y < followUp.y && decision.size > followUp.size);
   }
-  assert.ok(textBox(closingPage, longBody).size >= 1300);
+  assert.ok(textBox(closingPage, longBody).size >= 1600);
+});
+
+test('uses native chart bars only for explicit matching numeric units or part-to-whole measures', async () => {
+  const slide = deck.slides.find(({ layout }) => layout === 'metrics');
+  const samples = [
+    { heading: '42 / 50', body: '试点盘点完成数（实测）' },
+    { heading: '8% → 5%', body: '相同口径的差错率变化（实测）' },
+    { heading: '3万元/月', body: '订阅合同报价' },
+  ];
+  const version = { ...deck, slides: [{ ...slide, items: samples }] };
+  const pptx = await JSZip.loadAsync(await (await createPptxBlob(version, 'sage')).arrayBuffer());
+  const page = await pptx.file('ppt/slides/slide1.xml').async('string');
+  const bars = [...page.matchAll(/<a:off x="(\d+)" y="\d+"\/><a:ext cx="(\d+)" cy="118872"\/>/gu)]
+    .map(([, x, w]) => [Number(x), Number(w)]);
+  const barGroups = Map.groupBy(bars, ([x]) => x);
+  assert.equal(barGroups.size, 2);
+  const [partToWhole, beforeAfter] = [...barGroups.values()].map((group) => group.map(([, w]) => w));
+  assert.equal(partToWhole.length, 2);
+  assert.equal(beforeAfter.length, 4);
+  assert.ok(Math.abs(partToWhole[1] / partToWhole[0] - 42 / 50) < 0.0001);
+  assert.ok(Math.abs(beforeAfter[3] / beforeAfter[2] - 5 / 8) < 0.0001);
+});
+
+test('fits the cover title and charts only a matched observed and target percentage', async () => {
+  const title = '自助退款入口试点进展汇报';
+  const cover = { ...deck.slides[0], title };
+  const metricsPage = deck.slides.find(({ layout }) => layout === 'metrics');
+  const observed = { heading: '18%', body: '试点组自助完成率，已观测' };
+  const target = { heading: '25%', body: '自助完成率后续目标，尚未达成' };
+  const slides = [
+    cover,
+    { ...metricsPage, items: [observed, target] },
+    { ...metricsPage, items: [observed, { ...target, body: '满意度后续目标，尚未达成' }] },
+  ];
+  const version = { ...deck, slides };
+  const pptx = await JSZip.loadAsync(await (await createPptxBlob(version, 'editorial')).arrayBuffer());
+  const coverPage = await pptx.file('ppt/slides/slide1.xml').async('string');
+  assert.ok(textBox(coverPage, title).size >= 3500 && textBox(coverPage, title).size < 4200);
+
+  const matched = await pptx.file('ppt/slides/slide2.xml').async('string');
+  assert.equal((matched.match(/<a:t>100%<\/a:t>/gu) ?? []).length, 2);
+  const bars = [...matched.matchAll(/<a:ext cx="(\d+)" cy="118872"\/>/gu)].map(([, w]) => Number(w));
+  assert.equal(bars.length, 4);
+  assert.equal(bars[0], bars[2]);
+  assert.ok(Math.abs(bars[1] / bars[0] - 0.18) < 0.0001);
+  assert.ok(Math.abs(bars[3] / bars[2] - 0.25) < 0.0001);
+  const unmatched = await pptx.file('ppt/slides/slide3.xml').async('string');
+  assert.doesNotMatch(unmatched, /<a:t>100%<\/a:t>|cy="118872"/u);
 });
 
 test('reports overly dense text once per slide and ignores the small footer', () => {
@@ -102,7 +159,12 @@ test('reports overly dense text once per slide and ignores the small footer', ()
     heading: '盘点记录和试点基线调整原因及相关处理方法',
     body: '试点期间需要分开记录处理耗时。'.repeat(5).slice(0, 72),
   };
-  const denseClosing = { ...deck.slides.at(-1), items: Array(4).fill(denseItem) };
+  const denseClosing = {
+    ...deck.slides.at(-1),
+    title: '汇报试点结果并说明后续改进口径与待验证事项'.repeat(2),
+    subtitle: '说明试点背景、当前限制、样本情况及处理方式，以便确认下一轮复核范围。'.repeat(2),
+    items: Array(4).fill(denseItem),
+  };
   const issues = findReadabilityIssues({ ...deck, slides: [deck.slides[0], denseClosing] });
   assert.equal(issues.length, 1);
   assert.equal(issues[0].slide, 2);

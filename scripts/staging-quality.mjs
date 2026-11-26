@@ -80,7 +80,7 @@ function checkContent(key, deck) {
 }
 
 async function verifyPptx(deck) {
-  const bytes = Buffer.from(await (await createPptxBlob(deck, 'editorial')).arrayBuffer());
+  const bytes = Buffer.from(await (await createPptxBlob(deck, deck.visualTheme)).arrayBuffer());
   const zip = await JSZip.loadAsync(bytes, { checkCRC32: true });
   const slideNames = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
   assert.equal(slideNames.length, deck.slides.length, 'PPTX slide count mismatch');
