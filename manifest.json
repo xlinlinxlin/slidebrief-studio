@@ -1,0 +1,23 @@
+{
+  "schema": 4,
+  "required_executas": [],
+  "tags": ["presentations", "powerpoint", "productivity"],
+  "system_prompt_addendum": "When the user mentions Slidebrief to make or edit a presentation, call open_app_view with this app's numeric Anna App ID supplied by the host and view main. Open the view even if the user gives no topic. When provided explicitly by the user, pass the topic, audience, goal, and source as string fields in payload. Pass only the fields actually given. Do not invent facts or import material from outside the user's request. The user reviews the brief and chooses when to generate or rewrite in the workspace. After opening the view, briefly direct them to the workspace in their language.",
+  "ui": {
+    "bundle": {
+      "format": "static-spa",
+      "entry": "index.html"
+    },
+    "views": [
+      {
+        "name": "main",
+        "title": "Slidebrief · 汇报工坊",
+        "default": true,
+        "single_instance": true,
+        "min_size": { "w": 420, "h": 420 },
+        "default_size": { "w": 1120, "h": 750 },
+        "summary_template": "Slidebrief"
+      }
+    ]
+  }
+}

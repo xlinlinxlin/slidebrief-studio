@@ -1,0 +1,7 @@
+node_modules/
+bundle/
+.anna/
+.env
+.env.*
+*.local
+*.pptx
