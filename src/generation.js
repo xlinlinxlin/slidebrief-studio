@@ -93,12 +93,16 @@ async function completeJson(anna, system, input, maxTokens, validate) {
     reply = await anna.llm.complete({
       systemPrompt: system,
       messages: [{ role: 'user', content: { type: 'text', text: JSON.stringify(input) } }],
+      modelPreferences: { hints: [{ name: 'qwen3.8-flash' }] },
       maxTokens,
       thinking: false,
     });
   } catch (error) {
     if (error?.code === 'quota_exceeded' || error?.name === 'APP_QUOTA_EXCEEDED') {
       throw new SlidebriefError('quota_exceeded', 'Anna 额度不足。可以减少页数后重试，或继续编辑当前文稿。', { cause: error });
+    }
+    if (error?.code === 'APP_PROVIDER_ERROR' || error?.name === 'APP_PROVIDER_ERROR') {
+      throw new SlidebriefError('request_failed', 'Anna 当前模型暂不可用。请在 Anna 中切换文本模型后重试。', { cause: error });
     }
     throw new SlidebriefError('request_failed', 'Anna 暂时无法完成请求。请检查连接后手动重试。', { cause: error });
   }

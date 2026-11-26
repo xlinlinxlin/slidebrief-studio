@@ -37,6 +37,7 @@ test('generation spends one bounded Anna completion and returns verified data an
   });
   assert.equal(requests.length, 1);
   assert.equal(requests[0].thinking, false);
+  assert.deepEqual(requests[0].modelPreferences, { hints: [{ name: 'qwen3.8-flash' }] });
   assert.ok(requests[0].maxTokens > 0 && requests[0].maxTokens < 8192);
   assert.match(requests[0].systemPrompt, /exactly 5 slides/);
   assert.deepEqual(requests[0].messages.map(({ role }) => role), ['user']);

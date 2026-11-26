@@ -6,6 +6,7 @@ Slidebrief 帮助需要准备项目进展、复盘和方案汇报的用户，把
 | --- | --- |
 | App name | `Slidebrief · 汇报工坊` |
 | Slug | `slidebrief-studio` |
+| Anna 标识 | `@xiaolin/slidebrief-studio` |
 | 版本 | `1.0.0` |
 
 ![Slidebrief 的汇报任务、幻灯片预览与主题选择](docs/workspace.png)
@@ -19,7 +20,7 @@ Slidebrief 帮助需要准备项目进展、复盘和方案汇报的用户，把
 
 ## Anna 集成和额度
 
-应用通过 Anna App Runtime 的 `llm.complete` 调用当前账号的模型。生成整份简报与重写单页各发起一次请求，分别限制输出长度。示例、手动编辑、切换主题和 PPTX 导出都在浏览器内完成，不调用模型。每次生成前可以先检查 brief，出现异常时由用户决定是否重试。真实调用消耗执行账号的 Anna 额度。 [Anna LLM API](https://staging.anna.partners/developers/apps/llm-and-agent)
+应用通过 Anna App Runtime 的 `llm.complete` 调用模型，并向平台建议低成本的 `qwen3.8-flash`。用户在 Anna 保存的模型偏好优先。生成整份简报与重写单页各发起一次请求，分别限制输出长度。示例、手动编辑、切换主题和 PPTX 导出都在浏览器内完成。每次生成前可以先检查 brief，出现异常时由用户决定是否重试。真实调用消耗执行账号的 Anna 额度。 [Anna LLM API](https://staging.anna.partners/developers/apps/llm-and-agent)
 
 ## 本地运行
 
@@ -65,4 +66,4 @@ npx anna-app apps status slidebrief-studio --account https://staging.anna.partne
 
 本地通过 Anna CLI 严格校验与自动测试。桌面与窄屏浏览器验证了预览、编辑、主题切换、草稿保存和下载，PowerPoint 打开并渲染了覆盖 3 套主题和 5 种版式的样片。模拟 Anna 窗口验证了聊天字段带入、整稿生成与单页改写各发起一次请求，以及窗口内下载。
 
-Staging 真实测试、额度记录和公开发布须在账号授权后完成。
+已在 Anna staging 安装并启动 `0.0.0-draft`，核对平台提供的前端构建和本地构建一致。通过该应用窗口的 Anna Runtime，使用 `qwen3.8-flash` 将内置「客户支持知识库四周试点」生成 4 页 PPT。平台记录了 632 个输入 token、671 个输出 token，消耗 0.353 CU，账号余额从 1000 变为 999.65 CU。导出的 4 页 PPTX 均包含可编辑文本和讲稿。首版公开安装须通过 Anna 审核。 [应用商店入口](https://staging.anna.partners/store/@xiaolin/slidebrief-studio)
