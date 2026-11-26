@@ -1,9 +1,9 @@
 {
   "name": "Slidebrief · 汇报工坊",
   "slug": "slidebrief-studio",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "category": "productivity",
   "tagline": "把汇报 brief 和原始材料变成可编辑的 PowerPoint。",
-  "description": "面向需要快速准备工作汇报的用户。输入主题、听众、汇报目标和参考资料，让 Anna 起草 4、5、6 或 8 页简报。可以逐页改标题和要点、定向重写单页、切换主题，并下载带演讲备注的可编辑 PPTX。打开内置示例即可体验预览、编辑和导出。",
-  "changelog": "首版支持 Anna AI 起草、单页重写、3 套主题和可编辑 PPTX 导出。"
+  "description": "面向需要准备项目进展、复盘和决策汇报的用户。Anna 根据听众和素材规划提纲、写作和审稿，生成 4、5、6 或 8 页简报。可以逐页核对原文、改写、切换主题，并下载带讲稿的可编辑 PPTX。",
+  "changelog": "新增分阶段 AI 写作和独立审稿、逐页原文摘录、定向修订、指标版式及新的时间线和决策页。"
 }

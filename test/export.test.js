@@ -1,17 +1,23 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import JSZip from 'jszip';
-import { createPptxBlob, fileName, THEMES } from '../src/deck.js';
+import { createPptxBlob, fileName, findReadabilityIssues, THEMES } from '../src/deck.js';
 
 const item = { heading: '明确责任人', body: '确定全流程负责人，按周记录进度。' };
-const layouts = ['cover', 'points', 'comparison', 'roadmap', 'closing'];
+const layouts = ['cover', 'points', 'comparison', 'roadmap', 'metrics', 'closing'];
+const metrics = [
+  { heading: '42 / 50', body: '试点盘点完成数（实测）' },
+  { heading: '≤3%', body: '差错率目标（待验证）' },
+  { heading: '5%', body: '试点差错率（实测）' },
+];
 const deck = {
   title: '阶段回顾与下一步',
   slides: layouts.map((layout, index) => ({
     layout,
     title: index === 0 ? '质量 & 进度 <2026>' : `试点计划 ${index + 1}`,
     subtitle: '把反馈转化为改进计划',
-    items: Array.from({ length: index === 0 ? 0 : index === 2 ? 2 : 4 }, () => item),
+    items: layout === 'metrics' ? metrics
+      : Array.from({ length: layout === 'cover' ? 0 : layout === 'comparison' ? 2 : 4 }, () => item),
     notes: '先陈述目标，再解释节奏。 Q&A',
   })),
 };
@@ -29,7 +35,14 @@ test('writes editable wide PowerPoint slides, notes, and the selected theme', as
     assert.match(page, /<a:prstGeom prst="rect">/);
     assert.match(page, /<p:cNvSpPr txBox="1"\s*\/>/);
     assert.match(page, /<a:t>把反馈转化为改进计划<\/a:t>/u);
-    assert.equal((page.match(/<a:t>明确责任人<\/a:t>/gu) ?? []).length, slide.items.length);
+    if (slide.layout === 'metrics') {
+      for (const { heading, body } of metrics) {
+        const valueBox = textBox(page, heading);
+        assert.ok(valueBox.size > textBox(page, body).size, 'metric value should lead its description');
+      }
+    } else {
+      assert.equal((page.match(/<a:t>明确责任人<\/a:t>/gu) ?? []).length, slide.items.length);
+    }
     assert.doesNotMatch(page, /<p:pic\b/);
     const notes = await xml(`ppt/notesSlides/notesSlide${index + 1}.xml`);
     assert.match(notes, /先陈述目标，再解释节奏。 Q&amp;A/u);
@@ -38,6 +51,62 @@ test('writes editable wide PowerPoint slides, notes, and the selected theme', as
   assert.match(cover, /<p:bg><p:bgPr><a:solidFill><a:srgbClr val="11192C"/);
   assert.match(cover, /质量 &amp; 进度 &lt;2026&gt;/u);
   assert.match(await xml('ppt/slides/slide4.xml'), /<a:t>04<\/a:t>/);
+});
+
+function textBox(page, value) {
+  const shape = page.match(/<p:sp>[\s\S]*?<\/p:sp>/gu)
+    ?.find((candidate) => candidate.includes(`<a:t>${value}</a:t>`));
+  assert.ok(shape, `editable text box is missing ${value}`);
+  assert.match(shape, /<p:cNvSpPr txBox="1"\s*\/>/u);
+  const [, x, y] = shape.match(/<a:off x="(\d+)" y="(\d+)"/u);
+  return { x: Number(x), y: Number(y), size: Number(shape.match(/<a:rPr\b[^>]*\bsz="(\d+)"/u)[1]) };
+}
+
+test('promotes roadmap weeks, the primary point, and the closing decision', async () => {
+  const roadmap = deck.slides.find((slide) => slide.layout === 'roadmap');
+  const points = ['关键结论', '原因一', '原因二'].map((heading) => ({ ...item, heading }));
+  const decisions = ['批准小范围试点', '确定负责人', '约定复盘时间', '确认指标'].map((heading) => ({ ...item, heading }));
+  const longBody = '现场抽样显示当前流程仍有手工录入和等待复核两个阶段，试点期间需要分开记录处理耗时，周会统一复核异常原因，并在复盘时核对两组记录。';
+  decisions[3].body = longBody;
+  const slides = [
+    { ...deck.slides[1], items: points },
+    { ...roadmap, items: ['第 1 周：采集数据', '第 2–3 周 · 跟踪使用', 'Week 4: Review']
+      .map((heading) => ({ ...item, heading })) },
+    { ...deck.slides.at(-1), items: decisions },
+  ];
+  const pptx = await JSZip.loadAsync(await (await createPptxBlob({ ...deck, slides }, 'editorial')).arrayBuffer());
+  const pointPage = await pptx.file('ppt/slides/slide1.xml').async('string');
+  const [lead, firstReason, secondReason] = points.map(({ heading }) => textBox(pointPage, heading));
+  assert.ok(lead.x < firstReason.x && lead.size > firstReason.size);
+  assert.equal(firstReason.x, secondReason.x);
+  assert.ok(firstReason.y < secondReason.y);
+
+  const roadmapPage = await pptx.file('ppt/slides/slide2.xml').async('string');
+  for (const [label, activity] of [['第 1 周', '采集数据'], ['第 2–3 周', '跟踪使用'], ['Week 4', 'Review']]) {
+    assert.ok(textBox(roadmapPage, label).y < textBox(roadmapPage, activity).y);
+  }
+  assert.doesNotMatch(roadmapPage, /<a:t>0[123]<\/a:t>/u);
+
+  const closingPage = await pptx.file('ppt/slides/slide3.xml').async('string');
+  const decision = textBox(closingPage, decisions[0].heading);
+  for (const { heading } of decisions.slice(1)) {
+    const followUp = textBox(closingPage, heading);
+    assert.ok(decision.y < followUp.y && decision.size > followUp.size);
+  }
+  assert.ok(textBox(closingPage, longBody).size >= 1300);
+});
+
+test('reports overly dense text once per slide and ignores the small footer', () => {
+  assert.deepEqual(findReadabilityIssues(deck), []);
+  const denseItem = {
+    heading: '盘点记录和试点基线调整原因及相关处理方法',
+    body: '试点期间需要分开记录处理耗时。'.repeat(5).slice(0, 72),
+  };
+  const denseClosing = { ...deck.slides.at(-1), items: Array(4).fill(denseItem) };
+  const issues = findReadabilityIssues({ ...deck, slides: [deck.slides[0], denseClosing] });
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].slide, 2);
+  assert.match(issues[0].message, /文字过密/u);
 });
 
 test('covers theme metadata and cross-platform filenames', async () => {

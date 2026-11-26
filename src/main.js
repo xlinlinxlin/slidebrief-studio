@@ -7,7 +7,7 @@ import arrowUpRight from 'lucide/icons/arrow-up-right.svg?raw';
 import backwards from 'lucide/icons/chevron-left.svg?raw';
 import forwards from 'lucide/icons/chevron-right.svg?raw';
 import notes from 'lucide/icons/sticky-note.svg?raw';
-import check from 'lucide/icons/check.svg?raw';
+import reviewIcon from 'lucide/icons/clipboard-check.svg?raw';
 import close from 'lucide/icons/x.svg?raw';
 import plus from 'lucide/icons/plus.svg?raw';
 import minus from 'lucide/icons/minus.svg?raw';
@@ -24,10 +24,17 @@ const storageKey = 'slidebrief.v1';
 const uiThemeNames = { editorial: '纸本', midnight: '深海', sage: '苔青' };
 const blankBrief = { topic: '', audience: '', goal: '', source: '', count: 5 };
 const fields = ['topic', 'audience', 'goal', 'source'];
+const stageLabels = {
+  plan: '正在梳理汇报主线',
+  write: '正在撰写幻灯片',
+  review: '正在核对事实和汇报目标',
+  repair: '正在修订核对发现的问题',
+};
 const app = {
   brief: { ...blankBrief }, deck: structuredClone(sampleDeck), theme: 'editorial',
   origin: 'sample', index: 0, editing: false, showingNotes: false, status: null,
-  busy: '', usage: null, connection: hostWindow ? 'connecting' : 'local',
+  busy: '', progress: '', usage: null, usageAction: '', review: null,
+  connection: hostWindow ? 'connecting' : 'local',
 };
 let anna;
 let saveTimer;
@@ -62,7 +69,7 @@ root.innerHTML = `
     <aside class="brief">
       <div class="brief-heading">
         <h2>汇报任务</h2>
-        ${button('sample', arrowUpRight, '填入示例', 'class="text-button"')}
+        ${button('sample', arrowUpRight, '填入示例', 'class="text-button" id="sample"')}
       </div>
       <form id="brief-form">
         <label class="field">汇报主题 <span class="required">*</span>
@@ -83,8 +90,8 @@ root.innerHTML = `
           <div class="segments">${SLIDE_COUNTS.map((count) => `
             <label><input type="radio" name="count" value="${count}"><span>${count} 页</span></label>`).join('')}</div>
         </fieldset>
-        <button class="button primary" type="submit" id="generate">${sparkles}<span>生成演示文稿</span></button>
-        <p id="credit-line" class="credit-line"></p>
+        <button class="button primary" type="submit" id="generate" aria-describedby="credit-line">${sparkles}<span>生成演示文稿</span></button>
+        <p id="credit-line" class="credit-line" role="status"></p>
       </form>
     </aside>
     <section class="stage" aria-label="演示文稿工作区">
@@ -101,6 +108,11 @@ root.innerHTML = `
         </div>
       </div>
       <div id="status" class="status" aria-live="polite" hidden></div>
+      <details id="review-panel" class="review-panel" hidden>
+        <summary>${reviewIcon}<span id="review-title"></span>${forwards}</summary>
+        <p id="review-warning" hidden></p>
+        <ul id="review-issues"></ul>
+      </details>
       <div class="studio" id="studio">
         <div class="canvas-area">
           <div class="canvas-frame">
@@ -113,7 +125,7 @@ root.innerHTML = `
               ${iconButton('next', forwards, '下一页', 'id="next"')}
             </div>
             <div class="canvas-tools">
-              ${button('notes', notes, '讲稿', 'class="tool-button" id="notes-button"')}
+              ${button('notes', notes, '讲稿', 'class="tool-button" id="notes-button" aria-controls="notes-panel"')}
               ${button('edit', pen, '编辑内容', 'class="tool-button edit-button" id="edit-button"')}
             </div>
           </div>
@@ -142,6 +154,14 @@ for (const [id, theme] of Object.entries(THEMES)) {
 
 function currentSlide() {
   return app.deck.slides[app.index];
+}
+
+function currentEvidence() {
+  return app.deck.evidence?.[app.index] ?? [];
+}
+
+function clearCurrentEvidence() {
+  if (currentEvidence().length) app.deck.evidence[app.index] = [];
 }
 
 function slideOptions(index) {
@@ -179,6 +199,7 @@ function showStatus(text, tone = 'info') {
 
 function renderChrome() {
   const busy = Boolean(app.busy);
+  const generating = app.busy === 'generate';
   const connectionLabels = {
     connected: 'Anna 已连接', connecting: '正在连接 Anna', disconnected: 'Anna 连接失败', local: '本地预览',
   };
@@ -189,15 +210,22 @@ function renderChrome() {
   element('deck-title').textContent = app.deck.title || '未命名演示文稿';
   element('export').disabled = busy;
   element('export').innerHTML = app.busy === 'export' ? `${loader}<span>正在导出</span>` : `${download}<span>导出 PPTX</span>`;
+  element('sample').disabled = generating;
+  briefForm.querySelectorAll('[name]').forEach((control) => { control.disabled = generating; });
   element('generate').disabled = busy || app.connection === 'connecting';
-  element('generate').innerHTML = app.busy === 'generate'
+  element('generate').innerHTML = generating
     ? `${loader}<span>正在生成文稿</span>` : `${sparkles}<span>生成演示文稿</span>`;
-  element('credit-line').textContent = app.usage?.quotaConsumed != null
-    ? `上次成功调用消耗 ${app.usage.quotaConsumed} CU` : '每次生成调用 Anna 一次';
+  const credits = element('credit-line');
+  const quota = app.usage?.quotaConsumed;
+  const creditMessage = generating ? stageLabels[app.progress] ?? ''
+    : Number.isFinite(quota) ? `上次${app.usageAction}消耗 ${quota} CU` : '';
+  if (credits.textContent !== creditMessage) credits.textContent = creditMessage;
   element('studio').classList.toggle('is-editing', app.editing);
   element('edit-button').setAttribute('aria-expanded', String(app.editing));
   element('edit-button').disabled = app.busy === 'rewrite';
-  element('notes-button').setAttribute('aria-expanded', String(app.showingNotes));
+  const notesButton = element('notes-button');
+  notesButton.setAttribute('aria-expanded', String(app.showingNotes));
+  notesButton.querySelector('span').textContent = currentEvidence().length ? '讲稿与依据' : '讲稿';
   element('previous').disabled = app.index === 0 || app.busy === 'rewrite';
   element('next').disabled = app.index === app.deck.slides.length - 1 || app.busy === 'rewrite';
   element('page-index').textContent = `${app.index + 1} / ${app.deck.slides.length}`;
@@ -206,10 +234,42 @@ function renderChrome() {
   });
 }
 
+function setReview(review) {
+  const issues = Array.isArray(review?.issues) ? review.issues.filter((issue) =>
+    Number.isInteger(issue?.slide) && issue.slide > 0 && issue.slide <= app.deck.slides.length
+    && typeof issue.message === 'string' && issue.message.trim()) : [];
+  const warning = typeof review?.warning === 'string' ? review.warning.trim() : '';
+  const count = issues.length;
+  app.review = count || warning ? { issues, warning } : null;
+  const panel = element('review-panel');
+  panel.hidden = !app.review;
+  panel.open = Boolean(app.review);
+  element('review-title').textContent = count ? `生成时留下 ${count} 项待核对事项` : '生成核对未完成';
+  const warningLine = element('review-warning');
+  warningLine.hidden = !warning;
+  warningLine.textContent = warning;
+  const issueList = element('review-issues');
+  issueList.hidden = !count;
+  issueList.innerHTML = issues.map(({ slide, message }) => `
+    <li><button type="button" data-action="select" data-index="${slide - 1}">
+      <strong>第 ${slide} 页</strong><span>${escaped(message)}</span>
+    </button></li>`).join('');
+}
+
 function renderNotes() {
   const panel = element('notes-panel');
   panel.hidden = !app.showingNotes;
-  panel.textContent = app.showingNotes ? currentSlide().notes || '这一页还没有讲稿。' : '';
+  if (!app.showingNotes) {
+    panel.replaceChildren();
+    return;
+  }
+  const evidence = currentEvidence();
+  panel.innerHTML = `
+    <p>${escaped(currentSlide().notes || '这一页还没有讲稿。')}</p>
+    ${evidence.length ? `<section class="slide-evidence" aria-label="参考原文">
+      <h3>参考原文</h3>
+      ${evidence.map((quote) => `<blockquote>${escaped(quote)}</blockquote>`).join('')}
+    </section>` : ''}`;
 }
 
 function renderFilmstrip() {
@@ -238,6 +298,7 @@ function renderEditor() {
   if (!app.editing) return;
   const slide = currentSlide();
   const locked = Boolean(app.busy);
+  const metrics = slide.layout === 'metrics';
   const { minItems, maxItems } = LAYOUTS[slide.layout];
   const disabled = locked ? 'disabled' : '';
   const rewrite = app.busy === 'rewrite'
@@ -255,13 +316,13 @@ function renderEditor() {
     ${textarea('副标题', 'subtitle', slide.subtitle, FIELD_LIMITS.subtitle, 2, locked)}
     ${slide.items.map((item, index) => `
       <div class="item-group">
-        <div class="item-heading"><span>要点 ${index + 1}</span>
-          ${slide.items.length > minItems ? iconButton('remove-item', minus, '移除此要点', `data-index="${index}" ${disabled}`) : ''}
+        <div class="item-heading"><span>${metrics ? '指标' : '要点'} ${index + 1}</span>
+          ${slide.items.length > minItems ? iconButton('remove-item', minus, metrics ? '移除此指标' : '移除此要点', `data-index="${index}" ${disabled}`) : ''}
         </div>
-        ${textarea('小标题', `heading:${index}`, item.heading, FIELD_LIMITS.heading, 1, locked)}
-        ${textarea('内容', `body:${index}`, item.body, FIELD_LIMITS.body, 2, locked)}
+        ${textarea(metrics ? '数值或目标' : '小标题', `heading:${index}`, item.heading, FIELD_LIMITS.heading, 1, locked)}
+        ${textarea(metrics ? '指标名称与口径' : '内容', `body:${index}`, item.body, FIELD_LIMITS.body, 2, locked)}
       </div>`).join('')}
-    ${slide.items.length < maxItems ? button('add-item', plus, '添加要点', `class="text-button" ${disabled}`) : ''}
+    ${slide.items.length < maxItems ? button('add-item', plus, metrics ? '添加指标' : '添加要点', `class="text-button" ${disabled}`) : ''}
     ${textarea('讲稿', 'notes', slide.notes, FIELD_LIMITS.notes, 3, locked)}
     <form id="rewrite-form">
       <label class="field">改写要求
@@ -280,7 +341,7 @@ function renderDeck({ keepEditor = false } = {}) {
 }
 
 function snapshot() {
-  return { version: 1, brief: app.brief, deck: app.deck, theme: app.theme, origin: app.origin, index: app.index };
+  return { version: 1, brief: app.brief, deck: app.deck, theme: app.theme, origin: app.origin, index: app.index, review: app.review };
 }
 
 function save() {
@@ -321,6 +382,7 @@ function restore(data) {
     app.deck = validateDeck(data.deck, undefined, { draft: true });
     app.index = Number.isInteger(data.index) ? Math.max(0, Math.min(data.index, app.deck.slides.length - 1)) : 0;
     app.origin = data.origin === 'sample' ? 'sample' : 'edited';
+    setReview(data.review);
     if (Object.hasOwn(THEMES, data.theme)) app.theme = data.theme;
   } catch { /* Use the example when the saved deck cannot be recovered. */ }
 }
@@ -349,16 +411,24 @@ async function generate() {
   }
   app.status = null;
   renderStatus();
+  app.progress = 'plan';
   setBusy('generate');
   try {
-    const { deck, usage } = await generateDeck(anna, { ...app.brief });
-    Object.assign(app, { deck, usage, index: 0, origin: 'generated', editing: false });
-    showStatus(`已生成 ${deck.slides.length} 页演示文稿。`);
+    const { deck, usage, review } = await generateDeck(anna, { ...app.brief }, {
+      onProgress(stage) {
+        app.progress = stage;
+        renderChrome();
+      },
+    });
+    Object.assign(app, { deck, usage, usageAction: '生成', index: 0, origin: 'generated', editing: false });
+    setReview(review);
+    showStatus(`已生成 ${deck.slides.length} 页演示文稿。${app.review ? '请查看生成核对提示。' : ''}`);
     save();
   } catch (error) {
     showStatus(error.message || '暂时无法生成，请稍后重试。', 'error');
   } finally {
     app.busy = '';
+    app.progress = '';
     renderDeck();
   }
 }
@@ -375,8 +445,10 @@ async function rewrite(instruction) {
   try {
     const { slide, usage } = await rewriteSlide(anna, app.deck, app.index, instruction);
     app.deck.slides[app.index] = slide;
+    clearCurrentEvidence();
     if (app.index === 0) app.deck.title = slide.title;
     app.usage = usage;
+    app.usageAction = '改写';
     app.origin = 'edited';
     showStatus(`第 ${app.index + 1} 页已更新。`);
     save();
@@ -433,7 +505,7 @@ function editField(control) {
     const { minItems, maxItems } = LAYOUTS[slide.layout];
     if (slide.items.length > maxItems) {
       slide.items = slide.items.slice(0, maxItems);
-      showStatus(`当前版式最多保留 ${maxItems} 个要点。`);
+      showStatus(`当前版式最多保留 ${maxItems} 个${slide.layout === 'metrics' ? '指标' : '要点'}。`);
     }
     while (slide.items.length < minItems) slide.items.push({ heading: '', body: '' });
   } else if (itemIndex !== undefined) {
@@ -442,6 +514,7 @@ function editField(control) {
     slide[field] = control.value;
     if (field === 'title' && app.index === 0) app.deck.title = control.value;
   }
+  clearCurrentEvidence();
   app.origin = 'edited';
   save();
   renderDeck({ keepEditor: field !== 'layout' });
@@ -502,6 +575,7 @@ root.addEventListener('click', (event) => {
       if (app.busy) break;
       if (action === 'add-item') currentSlide().items.push({ heading: '', body: '' });
       else currentSlide().items.splice(Number(index), 1);
+      clearCurrentEvidence();
       app.origin = 'edited';
       save();
       renderDeck();

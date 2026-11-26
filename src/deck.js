@@ -1,5 +1,6 @@
 const WIDTH = 40 / 3;
 const HEIGHT = 7.5;
+const FOOTER_TOP = 6.78;
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 export const THEMES = {
@@ -27,6 +28,8 @@ const eastAsian = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Scrip
 const emoji = /\p{Extended_Pictographic}/u;
 const byGlyph = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const space = /\s/u;
+const chineseWeek = /^第\s*[0-9０-９一二三四五六七八九十]+(?:(?:\s*周)?\s*[-–—~～至到]\s*(?:第\s*)?[0-9０-９一二三四五六七八九十]+)?\s*周/u;
+const englishWeek = /^weeks?\s+\d+(?:\s*(?:[-–—]|to)\s*(?:week\s+)?\d+)?\b/iu;
 
 // Limit text to XML 1.0 characters before writing user input to the package.
 function plainText(value) {
@@ -90,23 +93,39 @@ function makeScene(slide, { theme, index = 0, total = 1, deckTitle = '' } = {}) 
   const text = (value, x, y, w, h, options) => {
     let content = plainText(value);
     if (!content) return 0;
-    const { size, color, bold = false, align = 'left', lineHeight = 1.16, insetRight = 0 } = options;
-    const usableWidth = w - insetRight;
-    let fitted = fitText(content, usableWidth, h, size, lineHeight);
-    if (fitted === 7 && content.includes('\n')) {
-      content = content.replace(/\s*\n\s*/gu, ' ');
-      fitted = fitText(content, usableWidth, h, size, lineHeight);
+    const { size, color, bold = false, align = 'left', lineHeight = 1.16 } = options;
+    let fitted = fitText(content, w, h, size, lineHeight);
+    if (fitted < 14 && content.includes('\n')) {
+      const condensed = content.replace(/\s*\n\s*/gu, ' ');
+      const condensedSize = fitText(condensed, w, h, size, lineHeight);
+      if (condensedSize > fitted) {
+        content = condensed;
+        fitted = condensedSize;
+      }
     }
+    const textHeightInInches = textHeight(content, w, fitted, lineHeight);
     shapes.push({
-      type: 'text', value: content, x, y, w, h, color, bold, align, lineHeight, insetRight,
-      size: fitted, cjk: eastAsian.test(content),
+      type: 'text', value: content, x, y, w, h, color, bold, align, lineHeight,
+      size: fitted, textHeight: textHeightInInches, cjk: eastAsian.test(content),
     });
-    return textHeight(content, usableWidth, fitted, lineHeight);
+    return textHeightInInches;
   };
   const dark = slide.layout === 'cover' || slide.layout === 'closing';
   const ink = dark ? palette.coverInk : palette.ink;
   const muted = dark ? palette.coverMuted : palette.muted;
   const accent = dark ? palette.coverAccent : palette.accent;
+  const itemBlock = (item, x, y, w, h, featured = false) => {
+    const pad = featured ? 0.32 : 0;
+    const headingY = y + (featured ? 0.52 : 0.15);
+    if (featured) rect(x, y, w, h, palette.panel);
+    else rect(x, y, w, 0.02, dark ? palette.pattern : palette.line);
+    rect(x + pad, y + (featured ? 0.28 : 0), 0.35, 0.05, accent);
+    const headingHeight = text(item.heading, x + pad, headingY, w - 2 * pad, featured ? 1.16 : 0.68,
+      { size: featured ? 31 : 21, color: ink, bold: true, lineHeight: 1.1 });
+    const bodyY = headingY + headingHeight + 0.14;
+    text(item.body, x + pad, bodyY, w - 2 * pad, y + h - bodyY - (featured ? 0.26 : 0.05),
+      { size: featured ? 21 : 18, color: muted });
+  };
 
   if (slide.layout === 'cover') {
     rect(9.35, 0, WIDTH - 9.35, HEIGHT, palette.pattern);
@@ -122,7 +141,7 @@ function makeScene(slide, { theme, index = 0, total = 1, deckTitle = '' } = {}) 
     rect(10.26, 5.25, 1.48, 0.065, palette.coverMuted);
     rect(0.78, 2.01, 0.8, 0.07, accent);
     const titleHeight = text(slide.title || deckTitle, 0.76, 2.4, 8.06, 2.06,
-      { size: 50, color: ink, bold: true, lineHeight: 1.07 });
+      { size: 46, color: ink, bold: true, lineHeight: 1.07 });
     text(slide.subtitle, 0.8, 2.64 + titleHeight, 8.04, 1.33, { size: 22, color: muted });
     return { background: palette.cover, shapes };
   }
@@ -130,21 +149,42 @@ function makeScene(slide, { theme, index = 0, total = 1, deckTitle = '' } = {}) 
   const items = Array.isArray(slide.items) ? slide.items.slice(0, 4) : [];
   const hasSubtitle = Boolean(plainText(slide.subtitle));
   const contentTop = hasSubtitle ? 2.87 : 2.38;
+  const contentHeight = 6.52 - contentTop;
   rect(0.78, 0.67, 0.51, 0.055, accent);
   const titleHeight = text(slide.title, 0.77, 0.91, 11.68, hasSubtitle ? 1.08 : 1.35,
     { size: 37, color: ink, bold: true, lineHeight: 1.1 });
   text(slide.subtitle, 0.8, 1.13 + titleHeight, 11.73, 0.64, { size: 17, color: muted });
 
-  if (slide.layout === 'roadmap') {
+  if (slide.layout === 'metrics') {
+    const gap = 0.28;
+    const width = (11.77 - (items.length - 1) * gap) / Math.max(items.length, 1);
+    items.forEach((item, index) => {
+      const x = 0.78 + index * (width + gap);
+      rect(x, contentTop, width, contentHeight, palette.panel);
+      rect(x + 0.29, contentTop + 0.28, 0.45, 0.065, accent);
+      text(item.heading, x + 0.27, contentTop + 0.54, width - 0.54, 1.22,
+        { size: 49, color: accent, bold: true, lineHeight: 1.04 });
+      text(item.body, x + 0.3, contentTop + 1.84, width - 0.6, contentHeight - 2.15,
+        { size: 20, color: ink });
+    });
+  } else if (slide.layout === 'roadmap') {
     const columnWidth = 11.77 / Math.max(items.length, 1);
     rect(0.78, contentTop + 0.77, 11.77, 0.045, palette.line);
     items.forEach((item, itemIndex) => {
       const x = 0.78 + itemIndex * columnWidth;
-      const width = columnWidth - 0.11;
-      text(String(itemIndex + 1).padStart(2, '0'), x, contentTop + 0.08, 1.17, 0.6, { size: 33, color: accent, bold: true });
+      const width = columnWidth - 0.24;
+      const heading = plainText(item.heading);
+      const week = heading.match(chineseWeek)?.[0] ?? heading.match(englishWeek)?.[0];
+      const label = week ?? String(itemIndex + 1).padStart(2, '0');
+      const activity = week ? heading.slice(week.length).replace(/^[\s:：·–—-]+/u, '') : heading;
+      text(label, x, contentTop + 0.08, width, 0.59,
+        { size: week ? 27 : 33, color: accent, bold: true, lineHeight: 1.05 });
       rect(x, contentTop + 0.72, 0.14, 0.14, accent);
-      text(item.heading, x, contentTop + 1.06, width, 0.66, { size: 20, color: ink, bold: true, insetRight: 0.24 });
-      text(item.body, x, contentTop + 1.84, width, 1.62, { size: 16, color: muted, insetRight: 0.24 });
+      const headingHeight = text(activity, x, contentTop + 1.05, width, 0.74,
+        { size: 21, color: ink, bold: true, lineHeight: 1.1 });
+      const bodyY = contentTop + 1.19 + headingHeight;
+      text(item.body, x, bodyY, width, contentTop + contentHeight - bodyY,
+        { size: 18, color: muted });
     });
   } else if (slide.layout === 'comparison' && items.length === 2) {
     items.forEach((item, itemIndex) => {
@@ -154,27 +194,54 @@ function makeScene(slide, { theme, index = 0, total = 1, deckTitle = '' } = {}) 
       text(item.heading, x + 0.29, contentTop + 0.46, 5.12, 0.91, { size: 26, color: ink, bold: true });
       text(item.body, x + 0.29, contentTop + 1.48, 5.12, 1.8, { size: 20, color: muted });
     });
+  } else if (slide.layout === 'closing' && items.length > 0) {
+    const [decision, ...followUps] = items;
+    const gap = 0.4;
+    const width = (11.77 - (followUps.length - 1) * gap) / Math.max(followUps.length, 1);
+    rect(0.78, contentTop, 11.77, 1.31, palette.pattern);
+    rect(0.78, contentTop, 0.055, 1.31, accent);
+    text(decision.heading, 1.06, contentTop + 0.2, 4.35, 0.91,
+      { size: 28, color: accent, bold: true, lineHeight: 1.1 });
+    text(decision.body, 5.68, contentTop + 0.2, 6.55, 0.91, { size: 20, color: ink });
+    followUps.forEach((item, index) => {
+      const x = 0.78 + index * (width + gap);
+      itemBlock(item, x, contentTop + 1.62, width, contentHeight - 1.62);
+    });
+  } else if (slide.layout === 'points' && items.length === 3) {
+    const rowHeight = (contentHeight - 0.26) / 2;
+    itemBlock(items[0], 0.78, contentTop, 5.1, contentHeight, true);
+    itemBlock(items[1], 6.35, contentTop, 6.2, rowHeight);
+    itemBlock(items[2], 6.35, contentTop + rowHeight + 0.26, 6.2, rowHeight);
   } else {
     const columns = items.length === 1 ? 1 : 2;
     const rows = Math.ceil(items.length / columns);
     const gap = 0.42;
     const width = (11.77 - (columns - 1) * gap) / columns;
-    const rowHeight = rows > 1 ? 1.75 : 3.05;
+    const rowGap = 0.24;
+    const rowHeight = (contentHeight - (rows - 1) * rowGap) / Math.max(rows, 1);
     items.forEach((item, itemIndex) => {
       const x = 0.78 + (itemIndex % columns) * (width + gap);
-      const y = contentTop + Math.floor(itemIndex / columns) * (rowHeight + 0.19);
-      rect(x, y, width, 0.025, dark ? palette.pattern : palette.line);
-      rect(x, y, 0.31, 0.055, accent);
-      text(item.heading, x, y + 0.17, width, 0.49, { size: 21, color: ink, bold: true });
-      text(item.body, x, y + 0.72, width - 0.05, rowHeight - 0.8, { size: 17, color: muted });
+      const y = contentTop + Math.floor(itemIndex / columns) * (rowHeight + rowGap);
+      itemBlock(item, x, y, width, rowHeight);
     });
   }
 
   const footerLine = dark ? palette.pattern : palette.line;
-  rect(0.78, 6.78, 11.77, 0.022, footerLine);
+  rect(0.78, FOOTER_TOP, 11.77, 0.022, footerLine);
   text(String(index + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0'),
     11.38, 6.93, 1.17, 0.3, { size: 11, color: muted, align: 'right' });
   return { background: dark ? palette.cover : palette.background, shapes };
+}
+
+export function findReadabilityIssues(deck) {
+  return deck.slides.flatMap((slide, index) => {
+    const { shapes } = makeScene(slide, { index, total: deck.slides.length, deckTitle: deck.title });
+    const overlyDense = shapes.some((shape) => shape.type === 'text' && shape.y < FOOTER_TOP
+      && (shape.size < 14 || shape.textHeight > shape.h));
+    return overlyDense
+      ? [{ slide: index + 1, message: '文字过密。请缩短长句，保留关键事实和数字，其余细节移入演讲备注。' }]
+      : [];
+  });
 }
 
 export function renderSlidePreview(container, slide, options) {
@@ -198,7 +265,6 @@ export function renderSlidePreview(container, slide, options) {
         fontFamily: shape.cjk ? '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif' : 'Aptos, Inter, Arial, sans-serif',
         fontSize: `${shape.size / (72 * WIDTH) * 100}cqw`, lineHeight: String(shape.lineHeight),
         whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', boxSizing: 'border-box',
-        paddingRight: `${shape.insetRight / WIDTH * 100}%`,
       });
     } else {
       element.style.backgroundColor = shape.color;
@@ -236,7 +302,7 @@ export async function createPptxBlob(deck, theme) {
         page.addShape(presentation.ShapeType.rect, { x, y, w, h, fill: { color }, line: { transparency: 100 } });
       } else {
         page.addText(shape.value, {
-          x, y, w, h, color, margin: [0, shape.insetRight * 72, 0, 0], align: shape.align, valign: 'top', wrap: true,
+          x, y, w, h, color, margin: 0, align: shape.align, valign: 'top', wrap: true,
           bold: shape.bold, fontSize: shape.size, fit: 'shrink', lineSpacing: shape.size * shape.lineHeight,
           fontFace: shape.cjk ? 'Microsoft YaHei' : 'Aptos', lang: shape.cjk ? 'zh-CN' : 'en-US',
           isTextBox: true,
